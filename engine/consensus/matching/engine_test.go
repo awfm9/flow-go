@@ -18,6 +18,7 @@ import (
 	"github.com/onflow/flow-go/model/chunks"
 	"github.com/onflow/flow-go/model/flow"
 	"github.com/onflow/flow-go/model/messages"
+	"github.com/onflow/flow-go/module/mempool/stdmap"
 	"github.com/onflow/flow-go/module/metrics"
 	mockmodule "github.com/onflow/flow-go/module/mock"
 	"github.com/onflow/flow-go/module/trace"
@@ -96,6 +97,7 @@ func (ms *MatchingSuite) SetupTest() {
 		receipts:                             ms.ReceiptsPL,
 		approvals:                            ms.ApprovalsPL,
 		seals:                                ms.SealsPL,
+		pendingReceipts:                      stdmap.NewPendingReceipts(100),
 		isCheckingSealing:                    atomic.NewBool(false),
 		sealingThreshold:                     10,
 		maxResultsToRequest:                  200,
@@ -157,7 +159,6 @@ func (ms *MatchingSuite) TestOnReceiptPendingReceipt() {
 
 	ms.ReceiptsPL.AssertExpectations(ms.T())
 	ms.ReceiptsDB.AssertNumberOfCalls(ms.T(), "Add", 0)
-	ms.ResultsPL.AssertNumberOfCalls(ms.T(), "Add", 0)
 }
 
 // Test that we store different receipts for the same result
@@ -182,7 +183,6 @@ func (ms *MatchingSuite) TestOnReceiptPendingResult() {
 	err := ms.matching.onReceipt(receipt.ExecutorID, receipt)
 	ms.Require().NoError(err, "should not error for different receipt for already pending result")
 	ms.ReceiptsPL.AssertExpectations(ms.T())
-	ms.ResultsPL.AssertExpectations(ms.T())
 	ms.ReceiptsDB.AssertNumberOfCalls(ms.T(), "Store", 1)
 }
 
@@ -202,16 +202,10 @@ func (ms *MatchingSuite) TestOnReceipt_ReceiptInPersistentStorage() {
 
 	// The receipt should be added to the receipts mempool
 	ms.ReceiptsPL.On("AddReceipt", receipt, ms.UnfinalizedBlock.Header).Return(true, nil).Once()
-	// The result should be added to the IncorporatedReceipts mempool (shortcut sealing Phase 2b):
-	// TODO: remove for later sealing phases
-	ms.ResultsPL.
-		On("Add", incorporatedResult(receipt.ExecutionResult.BlockID, &receipt.ExecutionResult)).
-		Return(true, nil).Once()
 
 	err := ms.matching.onReceipt(receipt.ExecutorID, receipt)
 	ms.Require().NoError(err, "should not error for different receipt for already pending result")
 	ms.ReceiptsPL.AssertExpectations(ms.T())
-	ms.ResultsPL.AssertExpectations(ms.T())
 	ms.ReceiptsDB.AssertNumberOfCalls(ms.T(), "Store", 1)
 }
 
@@ -228,18 +222,12 @@ func (ms *MatchingSuite) TestOnReceiptValid() {
 	// we expect that receipt is added to mempool
 	ms.ReceiptsPL.On("AddReceipt", receipt, ms.UnfinalizedBlock.Header).Return(true, nil).Once()
 
-	// setup the results mempool to check if we attempted to add the incorporated result
-	ms.ResultsPL.
-		On("Add", incorporatedResult(receipt.ExecutionResult.BlockID, &receipt.ExecutionResult)).
-		Return(true, nil).Once()
-
 	// onReceipt should run to completion without throwing an error
 	err := ms.matching.onReceipt(receipt.ExecutorID, receipt)
 	ms.Require().NoError(err, "should add receipt and result to mempool if valid")
 
 	ms.receiptValidator.AssertExpectations(ms.T())
 	ms.ReceiptsPL.AssertExpectations(ms.T())
-	ms.ResultsPL.AssertExpectations(ms.T())
 }
 
 // TestOnReceiptInvalid tests that we reject receipts that don't pass the ReceiptValidator
@@ -259,7 +247,6 @@ func (ms *MatchingSuite) TestOnReceiptInvalid() {
 
 	ms.receiptValidator.AssertExpectations(ms.T())
 	ms.ReceiptsDB.AssertNumberOfCalls(ms.T(), "Store", 0)
-	ms.ResultsPL.AssertNumberOfCalls(ms.T(), "Add", 0)
 }
 
 // try to submit an approval where the message origin is inconsistent with the message creator
