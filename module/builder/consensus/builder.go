@@ -108,7 +108,7 @@ func (b *Builder) BuildOn(parentID flow.Identifier, setter func(*flow.Header) er
 	}
 
 	// get the seals to insert in the payload
-	insertableSeals, err := b.getInsertableSeals(parentID, insertableReceipts)
+	insertableSeals, err := b.getInsertableSeals(parentID)
 	if err != nil {
 		return nil, fmt.Errorf("could not insert seals: %w", err)
 	}
@@ -247,7 +247,7 @@ func (b *Builder) getInsertableGuarantees(parentID flow.Identifier) ([]*flow.Col
 // 2) The seals should form a valid chain.
 //
 // 3) The seals should correspond to an incorporated result on this fork.
-func (b *Builder) getInsertableSeals(parentID flow.Identifier, insertableReceipts []*flow.ExecutionReceipt) ([]*flow.Seal, error) {
+func (b *Builder) getInsertableSeals(parentID flow.Identifier) ([]*flow.Seal, error) {
 
 	b.tracer.StartSpan(parentID, trace.CONBuildOnCreatePayloadSeals)
 	defer b.tracer.FinishSpan(parentID, trace.CONBuildOnCreatePayloadSeals)
@@ -322,20 +322,6 @@ func (b *Builder) getInsertableSeals(parentID flow.Identifier, insertableReceipt
 		}
 
 		ancestorID = ancestor.Header.ParentID
-	}
-
-	for _, receipt := range insertableReceipts {
-		seal, ok := b.sealPool.ByID(receipt.ExecutionResult.ID())
-		if !ok {
-			continue
-		}
-
-		header, err := b.headers.ByBlockID(receipt.ExecutionResult.BlockID)
-		if err != nil {
-			return nil, fmt.Errorf("could not get executed block for id (%x): %w", receipt.ExecutionResult.BlockID, err)
-		}
-
-		filteredSeals[header.Height] = seal
 	}
 
 	// now we need to collect only the seals that form a valid chain on top of

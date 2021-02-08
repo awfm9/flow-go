@@ -133,10 +133,10 @@ func (s *sealValidator) Validate(candidate *flow.Block) (*flow.Seal, error) {
 		return nil, engine.NewInvalidInputError("multiple seals for the same block")
 	}
 
-	// incorporatedResults collects the _first_ appearance of unsealed execution
+	// unsealedResults collects the _first_ appearance of unsealed execution
 	// results on the fork, along with the ID of the block in which they are
 	// incorporated.
-	incorporatedResults := make(map[flow.Identifier]*flow.IncorporatedResult)
+	unsealedResults := make(map[flow.Identifier]*flow.IncorporatedResult)
 
 	// collect IDs of blocks on the fork (from parent to last sealed)
 	var blockIDs []flow.Identifier
@@ -164,7 +164,7 @@ func (s *sealValidator) Validate(candidate *flow.Block) (*flow.Seal, error) {
 		// Collect execution results from receipts.
 		for _, receipt := range payload.Receipts {
 			resultID := receipt.ExecutionResult.ID()
-			// incorporatedResults should contain the _first_ appearance of the
+			// unsealedResults should contain the _first_ appearance of the
 			// ExecutionResult. We are traversing the fork backwards, so we can
 			// overwrite any previously recorded result.
 
@@ -174,7 +174,7 @@ func (s *sealValidator) Validate(candidate *flow.Block) (*flow.Seal, error) {
 			// ExecutionResult. However, in phase 2 of the sealing roadmap,
 			// we are still using a temporary sealing logic where the
 			// IncorporatedBlockID is expected to be the result's block ID.
-			incorporatedResults[resultID] = flow.NewIncorporatedResult(
+			unsealedResults[resultID] = flow.NewIncorporatedResult(
 				receipt.ExecutionResult.BlockID,
 				&receipt.ExecutionResult,
 			)
@@ -184,16 +184,11 @@ func (s *sealValidator) Validate(candidate *flow.Block) (*flow.Seal, error) {
 		ancestorID = ancestor.ParentID
 	}
 
-	// since the payload has passed the receiptExtend, the receipts must be incorporated.
-	// we must adding them to the incorporatedResults, otherwise if a matching receipt
-	// and seal are added in the same block, the seal would be considered as invalid by mistake.
-	for _, receipt := range candidate.Payload.Receipts {
-		resultID := receipt.ExecutionResult.ID()
-		incorporatedResults[resultID] = flow.NewIncorporatedResult(
-			receipt.ExecutionResult.BlockID,
-			&receipt.ExecutionResult,
-		)
-	}
+	// we do not include the receipts in the same payload to the unsealedResults.
+	// that's because a result requires to be added to a bock first in order to determine
+	// its chunk assignment for verification, therefore a seal can only be added in
+	// the next block or after. In other words, a receipt and its seal can't be
+	// added in the same block.
 
 	// Loop forward across the fork and try to create a valid chain of seals.
 	// blockIDs, as populated by the previous loop, is in reverse order.
@@ -214,7 +209,7 @@ func (s *sealValidator) Validate(candidate *flow.Block) (*flow.Seal, error) {
 		delete(byBlock, blockID)
 
 		// check if we have an incorporatedResult for this seal
-		incorporatedResult, ok := incorporatedResults[seal.ResultID]
+		incorporatedResult, ok := unsealedResults[seal.ResultID]
 		if !ok {
 			return nil, engine.NewInvalidInputErrorf("seal %x does not correspond to a result on this fork", seal.ID())
 		}
