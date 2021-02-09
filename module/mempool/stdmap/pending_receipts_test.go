@@ -10,8 +10,18 @@ import (
 	"github.com/onflow/flow-go/utils/unittest"
 )
 
+var empty []*flow.ExecutionReceipt
+
 func TestPendingReceipts(t *testing.T) {
 	t.Parallel()
+
+	t.Run("get nothing", func(t *testing.T) {
+		pool := NewPendingReceipts(100)
+
+		r := unittest.ExecutionReceiptFixture()
+		actual := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
+		require.Equal(t, empty, actual)
+	})
 
 	// after adding one receipt, should be able to query it back by previous result id
 	// after removing, should not be able to query it back.
@@ -23,15 +33,14 @@ func TestPendingReceipts(t *testing.T) {
 		ok := pool.Add(r)
 		require.True(t, ok)
 
-		actual, found := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
-		require.True(t, found)
-		require.Equal(t, r, actual)
+		actual := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
+		require.Equal(t, []*flow.ExecutionReceipt{r}, actual)
 
 		deleted := pool.Rem(r.ID())
 		require.True(t, deleted)
 
-		_, found = pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
-		require.False(t, found)
+		actual = pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
+		require.Equal(t, empty, actual)
 	})
 
 	chainedReceipts := func(n int) []*flow.ExecutionReceipt {
@@ -63,8 +72,8 @@ func TestPendingReceipts(t *testing.T) {
 
 		for i := 0; i < 100; i++ {
 			r := rs[i]
-			_, found := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
-			require.True(t, found)
+			actual := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
+			require.Equal(t, []*flow.ExecutionReceipt{r}, actual)
 		}
 
 		for i := 0; i < 100; i++ {
@@ -75,9 +84,31 @@ func TestPendingReceipts(t *testing.T) {
 
 		for i := 0; i < 100; i++ {
 			r := rs[i]
-			_, found := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
-			require.False(t, found)
+			actual := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
+			require.Equal(t, empty, actual)
 		}
+	})
+
+	t.Run("add receipts having same previous result id", func(t *testing.T) {
+		pool := NewPendingReceipts(100)
+
+		parent := unittest.ExecutionReceiptFixture()
+		parentID := parent.ID()
+		rs := make([]*flow.ExecutionReceipt, 100)
+		for i := 0; i < 100; i++ {
+			rs[i] = unittest.ExecutionReceiptFixture(func(receipt *flow.ExecutionReceipt) {
+				// having the same parent
+				receipt.ExecutionResult.PreviousResultID = parentID
+			})
+		}
+
+		for _, r := range rs {
+			ok := pool.Add(r)
+			require.True(t, ok)
+		}
+
+		actual := pool.ByPreviousResultID(parentID)
+		require.Equal(t, rs, actual)
 	})
 
 	t.Run("adding too many will eject", func(t *testing.T) {
@@ -99,8 +130,8 @@ func TestPendingReceipts(t *testing.T) {
 		total := 0
 		for i := 0; i < 100; i++ {
 			r := rs[i]
-			_, found := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
-			if found {
+			actual := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
+			if len(actual) > 0 {
 				total++
 			}
 		}
@@ -145,8 +176,8 @@ func TestPendingReceipts(t *testing.T) {
 
 		concurrently(100, func(i int) {
 			r := rs[i]
-			_, found := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
-			require.True(t, found)
+			actual := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
+			require.Equal(t, []*flow.ExecutionReceipt{r}, actual)
 		})
 
 		concurrently(100, func(i int) {
@@ -157,8 +188,8 @@ func TestPendingReceipts(t *testing.T) {
 
 		concurrently(100, func(i int) {
 			r := rs[i]
-			_, found := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
-			require.False(t, found)
+			actual := pool.ByPreviousResultID(r.ExecutionResult.PreviousResultID)
+			require.Equal(t, empty, actual)
 		})
 	})
 }
